@@ -1,8 +1,7 @@
 #include <stdio.h>
 #include <math.h>
 
-#define t 4000
-#define boxSize 100
+#define t 4000 //elements in file
 
 #define PS printf(
 #define PE );printf("\n");
@@ -27,10 +26,11 @@ int main(){
     FILE *fp;
     float x[t];
     float y[t];
-    int i = 0;
+    int i = 0, j = 0;
     float sum = 0;
     float xb = 0;
     int nBox = 0;
+    float l;
 
     PS "Opening the data file..." PE
     fp = fopen("data01.txt","r");
@@ -51,10 +51,12 @@ int main(){
     xb = sum/t;
 
 
-
-    PS "Integrating time series..." PE
+    PS "Integrating time series | comulative sums..." PE
     for(i=0;i<t;i++){
-        y[i]=x[i]-xb;
+    	y[i] = 0; //clearing the value
+    	for(j=0;j<=i;j++){
+    		y[i] += (x[j] - xb);
+    	}
     }
 
 
@@ -70,10 +72,22 @@ int main(){
     PS "Closing file..." PE
     fclose(fp);
 
-    PS "Calculating number of boxes to compute..." PE
-    nBox = t/boxSize;
-    IS nBox IE
+    PS "Calculating number and size of the boxes to compute..." PE
+    //Number of boxes must be equal to the nuber of elements in each box
+    for(i=1;i<t;i++){
+    	l = t/i;
+    	if(l<i){
+    		nBox = i-1;
+    		break;
+    	}
+    }
+    PS "Number of boxes: %d",nBox PE
+    PS "%d elements will be computed",nBox*nBox PE
 
+    PS "Calculating Detrended Fluctuation Function" PE
+
+
+    //hummm importar funções de memória dinâmica
 
 
 
