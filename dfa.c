@@ -9,6 +9,7 @@
 #define FS printf("%f\n",
 #define FE );
 
+
 #define NEWLINE printf("\n");
 
 int countRecordsInFile(FILE *fp){
@@ -29,28 +30,35 @@ int main(){
     FILE *fp;
     float *x; //input data
     float *y; //integrated data
-    float *Y; //detrended time series
+    double *Y; //detrended time series
     int i = 0, j = 0, k = 0; //cicles
     float xb = 0.0; //input data average
     int nBox = 0; //number of bixes
     float l = 0.0;
     int nRecords = 0;
-    //used in least squares 
-    float sumX = 0.0, sumY = 0.0; 
-    float sumXY = 0.0, sumXX = 0.0, sumYY = 0.0; 
-    float slope = 0.0; 
-    float yOrigin = 0.0; 
-    float den = 0.0; 
-    int startAt = 0; 
+    int window = 0;
+    //used in least squares
+    float sumX = 0.0, sumY = 0.0;
+    float sumXY = 0.0, sumXX = 0.0, sumYY = 0.0;
+    float slope = 0.0;
+    float yOrigin = 0.0;
+    float den = 0.0;
+    int startAt = 0;
     float *slopeList;
     float *yOriginList;
     //standart deviation
-    float *stdDeviationList;
+    double *stdDeviationList;
     float mean = 0.0;
     float squareMean = 0.0;
     float stdDev = 0.0;
     //log log
     double logX = 0.0;
+
+    int lowerBound = 0.0;
+
+    int *windowSet;
+    float *functionWindowSet;
+    int windows = 0.0;
 
 
 
@@ -68,7 +76,7 @@ int main(){
     PS "Allocating memory..." PE
     x = (float *)calloc(nRecords, sizeof(float));
     y = (float *)calloc(nRecords, sizeof(float));
-    Y = (float *)calloc(nRecords, sizeof(float));
+    Y = (double *)calloc(nRecords, sizeof(double));
     if (x == NULL || y == NULL || Y == NULL){
         PS "Error while allocating memory..." PE
         exit(1);
@@ -97,123 +105,153 @@ int main(){
     }
 
 
-    PS "Opening document to write integrated series" PE
-    fp = fopen("output.txt","w");
-
-
-    PS "Outputing integrated time series..." PE
+    PS "Writing integrated series to file..." PE
+    fp = fopen("o_integrated.txt","w");
     for(i=0;i<nRecords;i++){
         fprintf(fp,"%f\n",y[i]);
     }
-
-    PS "Closing file..." PE
     fclose(fp);
 
 
-
-    PS "Calculating number and size of the boxes to compute..." PE
-    //Number of boxes must be equal to the nuber of elements in each box
-    for(i=1;i<nRecords;i++){
-    	l = nRecords/i;
-    	if(l<i){
-    		nBox = i-1;
-    		break;
-    	}
-    }
-    PS "Number of boxes: %d",nBox PE
-    PS "%d elements will be computed",nBox*nBox PE
+    PS "Enter the lower bound for the windows: " PE
+    scanf("%d",&lowerBound);
 
 
-    PS "Allocating memory..." PE
-    slopeList = (float *)calloc(nBox, sizeof(float));
-    yOriginList = (float *)calloc(nBox, sizeof(float));
-    stdDeviationList = (float *)calloc(nBox, sizeof(float));
-    if (slopeList == NULL || yOriginList == NULL || stdDeviationList == NULL){
-        PS "Error while allocating memory..." PE
-        exit(1);
+    PS "Enter number of windows to compute: " PE
+    scanf("%d",&windows);
+
+    PS "Calculating windows set" PE
+    /* Peng et al. 1994 - The set of windows must be equally
+    spaced in a logarithmic scale*/
+    j = 0;
+    windowSet = (int *)calloc(windows, sizeof(int));
+    functionWindowSet = (float *)calloc(windows, sizeof(float));
+    j = nRecords - lowerBound;
+    j = j / windows;
+    for(i=0; i<windows; i++){
+        windowSet[i] = lowerBound+(i*j);
+        PS "BOUND: %d",windowSet[i] PE
     }
 
 
 
-    PS "Calculating Least Mean Squares" PE
-    for(i=0;i<nBox;i++){
-        for(j=startAt; j<(startAt+nBox); j++){
-            sumX += k;
-            sumY += y[j];
-            sumXY += k*y[j];
-            sumXX += k*k;
-            sumYY += y[j]*y[j];
-            k++;
+
+    int iter = 0;
+
+
+    for(iter=0; iter<windows; iter++){
+
+        startAt = 0;
+        nBox = (int) nRecords / windowSet[iter];
+        window = windowSet[iter];
+        PS "Number of boxes: %d",nBox PE
+        PS "%d elements will be computed",window*nBox PE
+
+
+        PS "Allocating memory..." PE
+        slopeList = (float *)calloc(nBox, sizeof(float));
+        yOriginList = (float *)calloc(nBox, sizeof(float));
+        stdDeviationList = (double *)calloc(nBox, sizeof(double));
+        if (slopeList == NULL || yOriginList == NULL || stdDeviationList == NULL){
+            PS "Error while allocating memory..." PE
+            exit(1);
         }
 
-        startAt = (i*nBox)+nBox;
 
-        den = (nBox * sumXX) - (sumX * sumX);
-        slope = ((nBox * sumXY) - (sumX * sumY)) / den;
-        yOrigin = ((sumY * sumXX) - (sumX * sumXY)) / den;
+        PS "Calculating Least Mean Squares" PE
+        for(i=0;i<nBox;i++){
+            for(j=startAt; j<(startAt+window); j++){
+                sumX += k;
+                sumY += y[j];
+                sumXY += k*y[j];
+                sumXX += k*k;
+                sumYY += y[j]*y[j];
+                k++;
+            }
 
-        slopeList[i] = slope;
-        yOriginList[i] = yOrigin;
+            startAt = (i*window)+window;
 
-        //PS "Window %d have a slope of %f and a y intersection of %f",i,slope,yOrigin PE
+            den = (window * sumXX) - (sumX * sumX);
+            slope = ((window * sumXY) - (sumX * sumY)) / den;
+            yOrigin = ((sumY * sumXX) - (sumX * sumXY)) / den;
 
+            slopeList[i] = slope;
+            yOriginList[i] = yOrigin;
 
-        sumX = sumY = sumXX = sumYY = sumXY = 0.0;
-    }
-
-
-    PS "Calculating Detrended Fluctuation Function" PE
-    j = k = 0;
-    for(i = 0; i<nBox*nBox; i++){
-
-    	Y[i] = y[i] - slopeList[k]*i+yOriginList[k];
-
-    	//go to next window
-    	if(j==nBox-1){
-    		j=0;
-    		k++;
-    	}
-    	j++;
-    }
-
-
-    PS "Calculating Standart Deviation" PE
-    startAt = 0;
-    mean = 0;
-    squareMean = 0;
-    for(i=0;i<nBox;i++){
-        for(j=startAt; j<(startAt+nBox); j++){
-            mean += Y[j];
-            mean /= nBox;
+            //PS "Window %d have a slope of %f and a y intersection of %f",i,slope,yOrigin PE
+            sumX = sumY = sumXX = sumYY = sumXY = 0.0;
         }
-        for(j=startAt; j<(startAt+nBox); j++){
-            k = Y[j]-mean;
-            k = pow(k,2);
-            squareMean += k;
-            squareMean /= nBox;
+
+
+        PS "Calculating Detrended Fluctuation Function" PE
+        j = k = 0;
+        for(i = 0; i<nBox*window; i++){
+
+            Y[i] = y[i] - slopeList[k]*i+yOriginList[k];
+            //go to next window
+            if(j==window-1){
+                j=0;
+                k++;
+            }
+            j++;
         }
-        stdDeviationList[i] = sqrt(squareMean);
-        startAt = (i*nBox)+nBox;
-        mean = squareMean = 0;
-        //PS "Box %d have a Standart Deviation of %f",i,stdDeviationList[i] PE
-        stdDev += stdDeviationList[i];
+
+        /*
+        PS "Writing detrended series to file..." PE
+        fp = fopen("o_detrended.txt","w");
+        for(i=0;i<nBox*window;i++){
+            fprintf(fp,"%f\n",Y[i]);
+        }
+        fclose(fp);
+        */
+
+
+        PS "Calculating Standart Deviation" PE
+        startAt = 0;
+        mean = 0;
+        squareMean = 0;
+        stdDev = 0;
+        for(i=0;i<nBox;i++){
+            for(j=startAt; j<(startAt+window); j++){
+                mean += Y[j];
+                mean /= window;
+            }
+            for(j=startAt; j<(startAt+window); j++){
+                k = Y[j]-mean;
+                k = pow(k,2);
+                squareMean += k;
+                squareMean /= window;
+            }
+            stdDeviationList[i] = sqrt(squareMean+0.0);
+            //PS "Window %d StdDev %f",i,stdDeviationList[i] PE
+            startAt = (i*window)+window;
+            mean = squareMean = 0;
+            //PS "Box %d have a Standart Deviation of %f",i,stdDeviationList[i] PE
+            stdDev += stdDeviationList[i];
+        }
+        stdDev /= nBox;
+        PS "Average Standart Deviation = %f",stdDev PE
+        functionWindowSet[iter] = stdDev;
+
+        free(slopeList);
+        free(yOriginList);
+        free(stdDeviationList);
     }
-    stdDev /= nBox;
-    PS "Average Standart Deviation = %f",stdDev PE
+
+
 
 
     PS "LOG x LOG Points" PE
     sumX = sumY = sumXX = sumYY = sumXY = 0.0;
-    for(i=0;i<nBox;i++){
-    	PS "Window: %d X = %lf and Y = %lf",i,log10(i+1),log10((double) stdDeviationList[i]) PE
-    	sumX += log10(i+1);
-        sumY += log10(stdDeviationList[i]);
-        sumXY += log10(i+1)*log10(stdDeviationList[i]);
-        sumXX += log10(i+1)*log10(i+1);
-        sumYY += log10(stdDeviationList[i])*log10(stdDeviationList[i]);
+    for(i=0;i<windows;i++){
+    	sumX += log10(windowSet[i]);
+        sumY += log10(functionWindowSet[i]);
+        sumXY += log10(windowSet[i])*log10(functionWindowSet[i]);
+        sumXX += log10(windowSet[i])*log10(windowSet[i]);
+        sumYY += log10(functionWindowSet[i])*log10(functionWindowSet[i]);
 
-        den = (nBox * sumXX) - (sumX * sumX);
-        slope = ((nBox * sumXY) - (sumX * sumY)) / den;
+        den = (window * sumXX) - (sumX * sumX);
+        slope = ((window * sumXY) - (sumX * sumY)) / den;
         yOrigin = ((sumY * sumXX) - (sumX * sumXY)) / den;
     }
 
@@ -222,16 +260,15 @@ int main(){
 
 
 
-
     PS "Freeing memory..." PE
     free(x);
     free(y);
     free(Y);
-    free(slopeList);
-    free(yOriginList);
-    free(stdDeviationList);
+    free(windowSet);
+    free(functionWindowSet);
 
     PS "The end!" PE
     return 0;
 }
+
 
