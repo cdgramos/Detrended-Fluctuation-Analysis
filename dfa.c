@@ -1,274 +1,173 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include "auxiliar.h"
 
-#define PS printf(
-#define PE );printf("\n");
-#define IS printf("%d\n",
-#define IE );
-#define FS printf("%f\n",
-#define FE );
-
-
-#define NEWLINE printf("\n");
-
-int countRecordsInFile(FILE *fp){
-    int lines = 0;
-    char ch;
-    while(!feof(fp)){
-      ch = fgetc(fp);
-      if(ch == '\n')
-        lines++;
-    }
-    return lines;
-}
-
+#define minValues 16 //mininum records to compute Detredended Fluctuation Analysis ! Imppotencyical Value
 
 int main(){
+    FILE *fp; // general purpose file pointer
 
-	//general
-    FILE *fp;
-    float *x; //input data
-    float *y; //integrated data
-    double *Y; //detrended time series
-    int i = 0, j = 0, k = 0; //cicles
-    float xb = 0.0; //input data average
-    int nBox = 0; //number of bixes
-    float l = 0.0;
-    int nRecords = 0;
-    int window = 0;
-    //used in least squares
-    float sumX = 0.0, sumY = 0.0;
-    float sumXY = 0.0, sumXX = 0.0, sumYY = 0.0;
-    float slope = 0.0;
-    float yOrigin = 0.0;
-    float den = 0.0;
-    int startAt = 0;
-    float *slopeList;
-    float *yOriginList;
-    //standart deviation
-    double *stdDeviationList;
-    float mean = 0.0;
-    float squareMean = 0.0;
-    float stdDev = 0.0;
-    //log log
-    double logX = 0.0;
+    int totRecords = 0; // number of data records
+    int totWindows = 0; // number of windows to compute
+    int minWindow = 0; // lower bound of the windows = (2 * degree of the fit function) + 2
+    int maxWindow = 0; // upper bound of the windows = totRecords / 4
+    int i = 0; // aux var
+    int j = 0; // aux var
+    int k = 0; // aux var
+    int z = 0; // aux var
+    long size = 0; // aux var
+    int nWindow = 0; //window number to compute
 
-    int lowerBound = 0.0;
+    int degreeFit = 1; // degree of the fit function
+    double boxratio = pow(2.0, 1.0/8.0);; // the scale of the windows that will be computed related to each other
 
-    int *windowSet;
-    float *functionWindowSet;
-    int windows = 0.0;
+    int totWindowsCertainSize = 0; // number of possible windows of a certain size
+
+    double xMean = 0.0; //raw data average
+
+    double *x; // store input / raw data
+    double *y; // integrated time series y = integrate(x)
+    double *Y; // detrended function
+    double *YY; // YY VALUES
+
+    double *avgStdDeviation;
+    double *windowSizes; // store window sizes
 
 
+    reg_Linear r;
+
+    int potency = 1;
+
+    double stat;
+    double sumFn = 0.0;
+    double sumAux = 0.0;
 
 
 
-    PS "Opening the data file..." PE
-    fp = fopen("data01.txt","r");
+    printf("Opening the raw data file...\n");
+    fp = fopen("hurst_050.txt","r");  //H = 0.50
 
-
-    PS "Counting number of records..." PE
-    nRecords = countRecordsInFile(fp);
+    printf("Counting number of records...\n");
+    totRecords = countRecordsInFile(fp);
     rewind(fp);
-    PS "Number of records: %d",nRecords PE
+    printf( "\tNumber of records: %d\n",totRecords);
+    if(totRecords <= minValues){
+    	printf( "\t\tError: Insuficient data\n");
+    	exit(1);
+    }
 
-    PS "Allocating memory..." PE
-    x = (float *)calloc(nRecords, sizeof(float));
-    y = (float *)calloc(nRecords, sizeof(float));
-    Y = (double *)calloc(nRecords, sizeof(double));
-    if (x == NULL || y == NULL || Y == NULL){
-        PS "Error while allocating memory..." PE
+
+    printf("Allocating memory...\n");
+    x = (double *) calloc(totRecords, sizeof(double));
+    y = (double *) calloc(totRecords, sizeof(double));
+    Y = (double *) calloc(totRecords, sizeof(double));
+    YY = (double *) calloc(totRecords, sizeof(double));
+
+    if(x == NULL || y == NULL || Y == NULL || YY == NULL){
+        printf( "\t\tError: allocating memory\n");
         exit(1);
     }
 
-    PS "Reading records and closing file..." PE
-    while(i < nRecords){
-        fscanf(fp,"%f\n",&x[i]);
+    printf("Reading raw data and closing the raw data file...\n");
+    while(i < totRecords){
+        fscanf(fp,"%lf\n",&x[i]);
         i++;
     }
+
+
+    printf("Calculating average...\n");
+    xMean = average(x, totRecords);
+
+    printf("Integrating time series | cumulative sums...\n");
+    integratingTimeSeries(x,y,xMean,totRecords);
+
+    printf("Defining lower and upper bounds\n");
+    minWindow = (2 * degreeFit) + 2; // (2 * degree of the fit function) + 2
+    maxWindow = totRecords / 4; // total records / 4
+    printf("\tBOUNDS: min-> %d \t max-> %d\n",minWindow,maxWindow);
+
+    totWindows = log10(maxWindow / (double)minWindow) / log10(boxratio) + 1.5;
+
+    printf("Allocating memory to store the window sizes and mean standard deviation...\n");
+    windowSizes = (double *) calloc(totWindows, sizeof(double));
+    avgStdDeviation = (double *) calloc(totWindows, sizeof(double));
+    if(avgStdDeviation == NULL){
+        printf( "\t\tError: allocating memory\n");
+        exit(1);
+    }
+
+    printf("Calculating aproximate number of windows to compute...\n");
+
+    windowSizes[0] = minWindow;
+
+    for (i = 0; windowSizes[i-1] < maxWindow; potency++){
+        size = minWindow * pow(boxratio, potency);
+            if (size > windowSizes[i-1]){
+                windowSizes[i] = size;
+                i++;
+            }
+        if(i > totWindows){
+            windowSizes[i-1] = maxWindow;
+        }
+    }
+
+    totWindows = i;
+
+    printf( "\t%d windows will be computed\n",totWindows);
+
+    // for(i=0;i<totWindows;i++) printf("%d\tRS:%.lf\n",i,windowSizes[i]);
+
+    for (i=0;i<totRecords;i++){// Continuous values in X
+        x[i] = i;
+    }
+
+    /// --- DFA START ---
+    for (i = 0; i < totWindows; i++) {    /// For each window size
+
+        stat = (int)(totRecords / windowSizes[i]) * windowSizes[i];
+         avgStdDeviation[i] = 0.0;
+         sumFn = 0.0;
+         sumAux = 0.0;
+
+        for (j = 0; j <= totRecords-windowSizes[i]; j += windowSizes[i]){  /// For each window of a certain size
+            r = reg_LeastSquareMeans(x,y,j,j+windowSizes[i]);
+
+            for(z = j; z <= j+windowSizes[i]; z++){  /// For each values in a certain window
+                sumAux = y[z] - r.m - (r.b * z);
+                sumFn += pow( sumAux ,2);
+            }
+        }
+
+        // Average of the values of a certain window size
+        avgStdDeviation[i] = sumFn/stat;
+
+    }
+    /// --- DFA END ---
+
+    //FILE *fd;
+    //fd = fopen("data.txt","w");
+    for (i = 0; i < totWindows; i++){ /// log x log scales
+        //fprintf(fd,"%lf %lf\n", log10((double)windowSizes[i]), log10((double)avgStdDeviation[i])/2);
+        windowSizes[i] = log10((double)windowSizes[i]);
+        avgStdDeviation[i] = log10((double)avgStdDeviation[i])/2;
+    }
+    //fclose(fd);
+
+    r = reg_LeastSquareMeans(windowSizes,avgStdDeviation,0,totWindows);
+
+    printf("\n_______________________________\n\n");
+    printf( "\tHurst = %.4lf\n_______________________________\n\n",r.b);
+
+    printf("Freeing the memory...\n");
     fclose(fp);
-
-    PS "Calculating average..." PE
-    for(i=0;i<nRecords;i++){
-        xb+=x[i];
-    }
-    xb = xb/nRecords;
-
-
-    PS "Integrating time series | cumulative sums..." PE
-    for(i=0;i<nRecords;i++){
-    	y[i] = 0; //clearing the value
-    	for(j=0;j<=i;j++){
-    		y[i] += (x[j] - xb);
-    	}
-    }
-
-
-    PS "Writing integrated series to file..." PE
-    fp = fopen("o_integrated.txt","w");
-    for(i=0;i<nRecords;i++){
-        fprintf(fp,"%f\n",y[i]);
-    }
-    fclose(fp);
-
-
-    PS "Enter the lower bound for the windows: " PE
-    scanf("%d",&lowerBound);
-
-
-    PS "Enter number of windows to compute: " PE
-    scanf("%d",&windows);
-
-    PS "Calculating windows set" PE
-    /* Peng et al. 1994 - The set of windows must be equally
-    spaced in a logarithmic scale*/
-    j = 0;
-    windowSet = (int *)calloc(windows, sizeof(int));
-    functionWindowSet = (float *)calloc(windows, sizeof(float));
-    j = nRecords - lowerBound;
-    j = j / windows;
-    for(i=0; i<windows; i++){
-        windowSet[i] = lowerBound+(i*j);
-        PS "BOUND: %d",windowSet[i] PE
-    }
-
-
-
-
-    int iter = 0;
-
-
-    for(iter=0; iter<windows; iter++){
-
-        startAt = 0;
-        nBox = (int) nRecords / windowSet[iter];
-        window = windowSet[iter];
-        PS "Number of boxes: %d",nBox PE
-        PS "%d elements will be computed",window*nBox PE
-
-
-        PS "Allocating memory..." PE
-        slopeList = (float *)calloc(nBox, sizeof(float));
-        yOriginList = (float *)calloc(nBox, sizeof(float));
-        stdDeviationList = (double *)calloc(nBox, sizeof(double));
-        if (slopeList == NULL || yOriginList == NULL || stdDeviationList == NULL){
-            PS "Error while allocating memory..." PE
-            exit(1);
-        }
-
-
-        PS "Calculating Least Mean Squares" PE
-        for(i=0;i<nBox;i++){
-            for(j=startAt; j<(startAt+window); j++){
-                sumX += k;
-                sumY += y[j];
-                sumXY += k*y[j];
-                sumXX += k*k;
-                sumYY += y[j]*y[j];
-                k++;
-            }
-
-            startAt = (i*window)+window;
-
-            den = (window * sumXX) - (sumX * sumX);
-            slope = ((window * sumXY) - (sumX * sumY)) / den;
-            yOrigin = ((sumY * sumXX) - (sumX * sumXY)) / den;
-
-            slopeList[i] = slope;
-            yOriginList[i] = yOrigin;
-
-            //PS "Window %d have a slope of %f and a y intersection of %f",i,slope,yOrigin PE
-            sumX = sumY = sumXX = sumYY = sumXY = 0.0;
-        }
-
-
-        PS "Calculating Detrended Fluctuation Function" PE
-        j = k = 0;
-        for(i = 0; i<nBox*window; i++){
-
-            Y[i] = y[i] - slopeList[k]*i+yOriginList[k];
-            //go to next window
-            if(j==window-1){
-                j=0;
-                k++;
-            }
-            j++;
-        }
-
-        /*
-        PS "Writing detrended series to file..." PE
-        fp = fopen("o_detrended.txt","w");
-        for(i=0;i<nBox*window;i++){
-            fprintf(fp,"%f\n",Y[i]);
-        }
-        fclose(fp);
-        */
-
-
-        PS "Calculating Standart Deviation" PE
-        startAt = 0;
-        mean = 0;
-        squareMean = 0;
-        stdDev = 0;
-        for(i=0;i<nBox;i++){
-            for(j=startAt; j<(startAt+window); j++){
-                mean += Y[j];
-                mean /= window;
-            }
-            for(j=startAt; j<(startAt+window); j++){
-                k = Y[j]-mean;
-                k = pow(k,2);
-                squareMean += k;
-                squareMean /= window;
-            }
-            stdDeviationList[i] = sqrt(squareMean+0.0);
-            //PS "Window %d StdDev %f",i,stdDeviationList[i] PE
-            startAt = (i*window)+window;
-            mean = squareMean = 0;
-            //PS "Box %d have a Standart Deviation of %f",i,stdDeviationList[i] PE
-            stdDev += stdDeviationList[i];
-        }
-        stdDev /= nBox;
-        PS "Average Standart Deviation = %f",stdDev PE
-        functionWindowSet[iter] = stdDev;
-
-        free(slopeList);
-        free(yOriginList);
-        free(stdDeviationList);
-    }
-
-
-
-
-    PS "LOG x LOG Points" PE
-    sumX = sumY = sumXX = sumYY = sumXY = 0.0;
-    for(i=0;i<windows;i++){
-    	sumX += log10(windowSet[i]);
-        sumY += log10(functionWindowSet[i]);
-        sumXY += log10(windowSet[i])*log10(functionWindowSet[i]);
-        sumXX += log10(windowSet[i])*log10(windowSet[i]);
-        sumYY += log10(functionWindowSet[i])*log10(functionWindowSet[i]);
-
-        den = (window * sumXX) - (sumX * sumX);
-        slope = ((window * sumXY) - (sumX * sumY)) / den;
-        yOrigin = ((sumY * sumXX) - (sumX * sumXY)) / den;
-    }
-
-    PS "ALPHA = %f",slope PE
-
-
-
-
-    PS "Freeing memory..." PE
+    free(YY);
+    free(windowSizes);
     free(x);
     free(y);
     free(Y);
-    free(windowSet);
-    free(functionWindowSet);
+    free(avgStdDeviation);
 
-    PS "The end!" PE
+    printf("The end!\n");
     return 0;
 }
-
-
